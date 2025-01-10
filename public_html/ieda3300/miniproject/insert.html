@@ -1,0 +1,43 @@
+<html>
+<head>
+<title> Insert Project </title>
+</head>
+<body bgcolor=#DDDDDD>
+<p>
+<!-- The lines above are the standard html header -->
+
+<b><font color=blue>
+Below are the common ways provided by HTML for user-provided data using forms.
+</b> </font>
+<p>
+<hr>
+
+<!-- Normal mode. (a) Comment out the DEBUG mode above (ii) Replace USER-LOGIN (iii) replace CGI-FILENAME -->
+<form method=POST action="http://khchandm.student.ust.hk/cgi-bin/ieda3300/miniproject/insert.php">
+	
+    <b>Please Enter the project data below</b>
+	<p>
+	<b>Project number:</b>
+                <input name=Pnumber type=text>
+    <p>
+	<b>Name:</b>
+                <input name=Pname type=text>
+    <p>
+	<b>Location:</b>
+                <input name=Plocation type=text>
+    <p>
+ 
+    <b>Controlling Dept:</b>
+                <select multiple name="Dnumber" size=>
+                  <option value="1"> 1
+                  <option value="4"> 4
+                  <option value="5"> 5
+                </select>
+    <p>
+	 <input name=submit type=submit>
+<!-- The lines below are a standard html footer -->
+<p>
+<hr>
+<p>
+</body>
+</html>

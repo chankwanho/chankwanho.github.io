@@ -1,0 +1,57 @@
+<html>
+<head>
+<title> Deactivate Project </title>
+</head>
+<body bgcolor=#DDDDDD>
+<p>
+
+<form method=POST action="http://USER.student.ust.hk/cgi-bin/ComprehensiveFormCGI.php">
+<p>
+<select name=Pnumber>
+
+<?php
+
+$DB_SERVER = "iez085.ieda.ust.hk";
+$USER_NAME = "khchandm";
+$USER_PASSWORD =20768309;
+$DB_NAME =khchandm_db;
+
+/*echo $DB_SERVER;
+echo $USER_NAME;
+echo $USER_PASSWORD;
+echo $DB_NAME;*/
+
+/*--echo "Start \n";
+echo "<hr>";*/
+
+$conn = mysqli_connect($DB_SERVER, $USER_NAME ,$USER_PASSWORD, $DB_NAME);
+
+if (!$conn) {
+	echo "Could not connect: ";
+	echo mysqli_connect_error();
+}
+$query1 = "select Pnumber,Pname from department";
+$result = mysqli_query($conn, $query1);
+while ($row = $result->mysqli_fetch_assoc()) {
+	unset($Pnumber, $Pname);
+	$Pnumber = $row['Pnumber'];
+	$Pname = $row['Pname'];
+    echo '<option value= '.$Pnumber.' > '.$Pname.' </option>';
+	//printf($Pnumber);
+	//printf($Pname); 
+}
+?>
+
+</select>
+<p><input name=submit type=submit>
+
+
+<!--?php
+while ($row = mysqli_fetch_row($result)) {
+    printf("%d %d <br>\n", $row[0], $row[1]);
+} -->
+
+<hr>
+
+</body>
+</html> 

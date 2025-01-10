@@ -1,0 +1,1743 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Meal Recommendations</title>
+    <!-- Add your CSS stylesheets here -->
+    <style>
+        /* Add your custom styles here */
+        table {
+            border-collapse: collapse;
+            width: 100%;
+        }
+        th, td {
+            border: 1px solid #ddd;
+            padding: 8px;
+            text-align: center;
+        }
+        th {
+            background-color: #f2f2f2;
+        }
+        .scrollable-taste {
+            height: 100px;
+            overflow-y: auto;
+        }
+    </style>
+    <script src="https://unpkg.com/javascript-lp-solver/prod/solver.js"></script>
+    <script>
+        // Function to get cookie by name
+        function getCookie(name) {
+            var nameEQ = name + "=";
+            var ca = document.cookie.split(';');
+            for(var i=0;i < ca.length;i++) {
+                var c = ca[i];
+                while (c.charAt(0)==' ') c = c.substring(1,c.length);
+                if (c.indexOf(nameEQ) == 0) return c.substring(nameEQ.length,c.length);
+            }
+            return null;
+        }
+
+        // Retrieve nutrient variables from cookies
+        var E = parseFloat(getCookie('tedd'));
+        var N_protein = parseFloat(getCookie('proteinLow'));
+        var L_protein = parseFloat(getCookie('proteinHigh'));
+        var N_fats = parseFloat(getCookie('fatsLow'));
+        var L_fats = parseFloat(getCookie('fatsHigh'));
+        var N_carbohydrates = parseFloat(getCookie('carbohydratesLow'));
+        var L_carbohydrates = parseFloat(getCookie('carbohydratesHigh'));
+        var N_fiber = parseFloat(getCookie('fiber'));
+        var N_calcium = parseFloat(getCookie('calcium'));
+
+        var gender = getCookie('sex');
+
+        var L_sat_fat = gender === 'female' ? 20 : 30;
+        var L_sugar = gender === 'female' ? 24 : 36;
+        var L_chol = 300;
+        var L_sodium = 2000;
+
+        // Function to insert variable values into the table
+        function insertVariableValues() {
+            document.getElementById('energy').textContent = E;
+            document.getElementById('N_protein').textContent = N_protein;
+            document.getElementById('L_protein').textContent = L_protein;
+            document.getElementById('N_fats').textContent = N_fats;
+            document.getElementById('L_fats').textContent = L_fats;
+            document.getElementById('N_carbohydrates').textContent = N_carbohydrates;
+            document.getElementById('L_carbohydrates').textContent = L_carbohydrates;
+            document.getElementById('fiber').textContent = N_fiber;
+            document.getElementById('calcium').textContent = N_calcium;
+            document.getElementById('saturatedFat').textContent = L_sat_fat;
+            document.getElementById('cholesterol').textContent = L_chol;
+            document.getElementById('sugar').textContent = L_sugar;
+            document.getElementById('sodium').textContent = L_sodium;
+        }
+
+        // Call the insertVariableValues function when the document finishes loading
+        window.addEventListener('load', insertVariableValues);
+
+        // Read the sample data from the CSV file
+        // var data = readCSV('categorized_selected_data.csv');
+        // Assume you have a CSV file named 'categorized_selected_data_v1.csv'
+        const csvFilePath = 'https://khchandm.student.ust.hk/ieda4920/categorized_selected_data_v1.csv';
+        //const csvFilePath = 'https://khchandm.student.ust.hk/ieda4920/categorized_selected_data_v1_r2.csv';
+
+        let data = [];
+
+        // Fetch the CSV file
+        fetch(csvFilePath)
+            .then(response => response.text())
+            .then(csvData => {
+                // Parse the CSV data (you might need a more robust CSV parser)
+                const rows = csvData.replace(/\r\n|\r|\n/g, '\n').trim().split('\n');
+                const headers = rows[0].split(','); // Assuming the first row contains column headers
+                //const data = [];
+
+                for (let i = 1; i < rows.length; i++) {
+                    const values = rows[i].split(',');
+                    const item = {};
+
+                    for (let j = 0; j < headers.length; j++) {
+                        item[headers[j]] = values[j];
+                    }
+
+                    data.push(item);
+                } 
+
+                document.addEventListener('DOMContentLoaded', function() {
+                        const form = document.querySelector('form');
+                        form.addEventListener('submit', submitForm);
+                        //form.addEventListener('submit', console.log("Form submitted"));
+                });
+            })   
+            .catch(error => {
+                console.error('Error fetching CSV data:', error);
+        });
+
+        function milpModel(E, N_carb, N_protein, N_fat, N_fiber, N_calcium, L_carb, L_protein, L_fat, L_sat_fat, L_chol, L_sodium, L_sugar, T_spicy, 
+            T_sweet, T_salty, T_sour, P_restaurant, P_main_food, P_main_ingredient, L_vegetarian, L_gluten, L_milk, L_egg, L_fish, L_crustaceans) {
+
+            E *= 0.4;
+            N_carb *= 0.4;
+            N_protein *= 0.4;
+            N_fat *= 0.4;
+            N_fiber *= 0.4;
+            N_calcium *= 0.4;
+            L_carb *= 0.4;
+            L_fat *= 0.4;
+            L_sat_fat *= 0.4;
+            L_chol *= 0.4;
+            L_sodium *= 0.4;
+            L_sugar *= 0.4;
+            
+            /* //test model
+            const model = {
+                optimize: "capacity",
+                opType: "max",
+                constraints: {
+                    plane: { max: 44 },
+                    person: { max: 512 },
+                    cost: { max: 300000 },
+                },
+                variables: {
+                    brit: {
+                    capacity: 20000,
+                    plane: 1,
+                    person: 8,
+                    cost: 5000,
+                    },
+                    yank: {
+                    capacity: 30000,
+                    plane: 1,
+                    person: 16,
+                    cost: 9000,
+                    },
+                },
+            };
+
+            const results = solver.Solve(model); // Note the capital 'Solve'
+            console.log("Results", results); 
+            */
+
+            var I = [...new Set(data.map(item => item['English Name']))]; // Set of dishes
+            I = I.map(item => item.replace(/"/g, "")); // Remove single quotes from dish names
+            I = I.filter(item => item !== null); // Remove elements with a value of NaN
+            var J = [...new Set(data.map(item => item['Restaurant']))]; // Set of restaurants
+            J = J.filter(item => item !== null); // Remove elements with a value of NaN
+            //console.log(J);
+
+            var c = Object.fromEntries(data.map(item => {
+                const price = parseFloat(item['price'].trim());
+                return [item['English Name'].replace(/"/g, ""), isNaN(price) ? 0 : price]; // If the price isn't a number, default to 0
+            }));
+            //console.log(c);
+            var e = Object.fromEntries(data.map(item => [item['English Name'].replace(/"/g, ""), parseFloat(item['Energy (kcal)'])]));
+            var carb = Object.fromEntries(data.map(item => [item['English Name'].replace(/"/g, ""), parseFloat(item['Total Carbohydrate'])]));
+            var protein = Object.fromEntries(data.map(item => [item['English Name'].replace(/"/g, ""), parseFloat(item['Protein'])]));
+            var fat = Object.fromEntries(data.map(item => [item['English Name'].replace(/"/g, ""), parseFloat(item['Total Fat'])]));
+            var sat_fat = Object.fromEntries(data.map(item => [item['English Name'].replace(/'/g, ""), parseFloat(item['Saturated Fat'])]));
+            var chol = Object.fromEntries(data.map(item => [item['English Name'].replace(/"/g, ""), parseFloat(item['Chol'])]));
+            var fiber = Object.fromEntries(data.map(item => [item['English Name'].replace(/"/g, ""), parseFloat(item['Total Dietary Fiber'])]));
+            var sugar = Object.fromEntries(data.map(item => [item['English Name'].replace(/"/g, ""), parseFloat(item['Total Sugars'])]));
+            var calcium = Object.fromEntries(data.map(item => [item['English Name'].replace(/"/g, ""), parseFloat(item['Calcium'])]));
+            var sodium = Object.fromEntries(data.map(item => [item['English Name'].replace(/"/g, ""), parseFloat(item['Sodium'])]));
+            var main_food = Object.fromEntries(data.map(item => [item['English Name'].replace(/"/g, ""), item['Item type'] === 1 ? 1 : 0])); // Main food indicator of each dish
+            var main_ingredient = Object.fromEntries(data.map(item => [item['English Name'].replace(/"/g, ""), parseInt(item['ingredient_category'])]));
+            var spicy = Object.fromEntries(data.map(item => [item['English Name'].replace(/"/g, ""), item['spicy'] === 'TRUE' ? 1 : 0]));
+            var sweet = Object.fromEntries(data.map(item => [item['English Name'].replace(/"/g, ""), item['sweet'] === 'TRUE' ? 1 : 0]));
+            var salty = Object.fromEntries(data.map(item => [item['English Name'].replace(/"/g, ""), item['salty'] === 'TRUE' ? 1 : 0]));
+            var sour = Object.fromEntries(data.map(item => [item['English Name'].replace(/"/g, ""), item['sour'] === 'TRUE' ? 1 : 0]));
+            var vegetarian = Object.fromEntries(data.map(item => [item['English Name'].replace(/"/g, ""), item['vegetarian'] === 'TRUE' ? 1 : 0]));
+            var gluten = Object.fromEntries(data.map(item => [item['English Name'].replace(/"/g, ""), item['gluten'] === 'TRUE' ? 1 : 0]));
+            var milk = Object.fromEntries(data.map(item => [item['English Name'].replace(/"/g, ""), item['milk'] === 'TRUE' ? 1 : 0]));
+            var egg = Object.fromEntries(data.map(item => [item['English Name'].replace(/"/g, ""), item['egg'] === 'TRUE' ? 1 : 0]));
+            //console.log(egg);
+            var fish = Object.fromEntries(data.map(item => [item['English Name'].replace(/"/g, ""), item['fish'] === 'TRUE' ? 1 : 0]));
+            var crustaceans = Object.fromEntries(data.map(item => [item['English Name'].replace(/"/g, ""), item['crustaceans'] === 'TRUE' ? 1 : 0]));
+
+            var dish_restaurant = Object.fromEntries(data.map(item => [item['English Name'].replace(/"/g, ""), parseInt(item['Restaurant']), item != null])); // Dictionary that maps the dish name to the restaurant number
+            //console.log(dish_restaurant);
+            var S = 2; // Maximum number of snacks
+
+            //var c = Object.fromEntries(data.map(item => [item['English Name'], item['price']])); // Price of each dish
+
+            var item_type = Object.fromEntries(data.map(item => [item['English Name'].replace(/"/g, ""), item['Item type'] === 1 ? 1 : 0])); // Item type of each dish
+
+            // Implement the logic of the MILP model using the input variables
+
+            //var solver = require('jsLPSolver');
+            //console.log(c);
+            //console.log(item_type);
+
+            // Define the decision variables and the objective function
+            var model = {
+                "optimize": "cost",
+                "opType": "min",
+                "constraints": {},
+                "variables": {},
+                "ints": {}
+            };
+
+            I.pop();
+            J.pop();
+
+            //console.log(I);
+
+            // Adding the binary variables for dishes
+            I.forEach(function(i) {
+                var variableName = "x_" + i.replace(/"/g, "");
+                model.variables[variableName] = {
+                    cost: c[i],
+                    energy: e[i],
+                    carb: carb[i],
+                    protein: protein[i],
+                    fat: fat[i],
+                    sat_fat: sat_fat[i],
+                    chol: chol[i],
+                    fiber: fiber[i],
+                    sugar: sugar[i],
+                    calcium: calcium[i],
+                    sodium: sodium[i],
+                    main_food: main_food[i],
+                    main_ingredient: main_ingredient[i],
+                    spicy: spicy[i],
+                    sweet: sweet[i],
+                    salty: salty[i],
+                    sour: sour[i],
+                    vegetarian: vegetarian[i],
+                    gluten: gluten[i],
+                    milk: milk[i],
+                    egg: egg[i],
+                    fish: fish[i],
+                    crustaceans: crustaceans[i],
+                    dish_restaurant: dish_restaurant[i],
+                    item_type: item_type[i],
+                    // Add other relevant properties here
+                };
+                model.ints[variableName] = 1;
+            });
+
+            //console.log(J);
+
+            // Adding the binary variables for restaurants
+
+            J.forEach(function(j) {
+                var variableName = "y_" + j;
+                model.variables[variableName] = {};
+                model.ints[variableName] = 1;
+            });
+
+            // Other constraints 
+            /*
+            model.constraints["main_food"] = { "equal": 1, "coefficients": {} };
+            I.forEach(function(i) {
+                if (main_food[i]) {
+                    model.constraints["main_food"]["coefficients"]["x_" + i] = main_food[i];
+                }
+            });
+            //*/
+            /*
+
+            model.constraints["restaurant_selection"] = { "equal": 1, "coefficients": {} };
+            J.forEach(function(j) {
+                model.constraints["restaurant_selection"]["coefficients"]["y_" + j] = 1;
+            });
+            */
+            /*
+
+            I.forEach(function(i) {
+                var dishVariable = "x_" + i.replace(/"/g, ""); // Dish variable name
+                var restaurantVariable = "y_" + dish_restaurant[i]; // Corresponding restaurant variable name
+
+                // Add constraint: if dish is chosen, corresponding restaurant must be chosen
+                model.constraints[dishVariable + "_implies_" + restaurantVariable] = {
+                    "min": 0,
+                    "max": 1,
+                    "coefficients": {}
+                };
+                model.constraints[dishVariable + "_implies_" + restaurantVariable]["coefficients"][dishVariable] = -1;
+                model.constraints[dishVariable + "_implies_" + restaurantVariable]["coefficients"][restaurantVariable] = 1;
+            });
+
+            */
+           /*
+
+            I.forEach(function(i) {
+                model.constraints["vegetarian_" + i] = { "man": L_vegetarian, "coefficients": {} };
+                model.constraints["vegetarian_" + i]["coefficients"]["x_" + i] = vegetarian[i];
+
+                model.constraints["gluten_" + i] = { "min": L_gluten, "coefficients": {} };
+                model.constraints["gluten_" + i]["coefficients"]["x_" + i] = gluten[i];
+
+                model.constraints["milk_" + i] = { "min": L_milk, "coefficients": {} };
+                model.constraints["milk_" + i]["coefficients"]["x_" + i] = milk[i];
+
+                model.constraints["egg_" + i] = { "min": L_egg, "coefficients": {} };
+                model.constraints["egg_" + i]["coefficients"]["x_" + i] = egg[i];
+
+                model.constraints["fish_" + i] = { "min": L_fish, "coefficients": {} };
+                model.constraints["fish_" + i]["coefficients"]["x_" + i] = fish[i];
+
+                model.constraints["crustaceans_" + i] = { "min": L_crustaceans, "coefficients": {} };
+                model.constraints["crustaceans_" + i]["coefficients"]["x_" + i] = crustaceans[i];
+            });
+            */
+
+            // Nutrient requirements
+            model.constraints["energy"] = { "min": E, "coefficients": {} };
+            I.forEach(function(i) {
+                model.constraints["energy"]["coefficients"]["x_" + i.replace(/"/g, "")] = e[i];
+            });
+            //console.log(model.constraints["energy"]["coefficients"]);
+            //*
+
+            // Repeat for carb, protein, fiber, calcium requirements
+            model.constraints["carb"] = { "min": N_carb , "max": L_carb, "coefficients": {}};
+            I.forEach(function(i) {
+                model.constraints["carb"]["coefficients"]["x_" + i] = carb[i];
+            });
+            //*
+            model.constraints["protein"] = { "min": N_protein, "max": L_protein, "coefficients": {} };
+            I.forEach(function(i) {
+                model.constraints["protein"]["coefficients"]["x_" + i.replace(/"/g, "")] = protein[i];
+            });
+            //*
+            model.constraints["fiber"] = { "min": N_fat, "coefficients": {} };
+            I.forEach(function(i) {
+                model.constraints["fiber"]["coefficients"]["x_" + i.replace(/"/g, "")] = fiber[i];
+            });
+            //*
+            model.constraints["calcium"] = { "min": N_calcium, "coefficients": {} };
+            I.forEach(function(i) {
+                model.constraints["calcium"]["coefficients"]["x_" + i.replace(/"/g, "")] = calcium[i];
+            });
+            console.log(N_calcium);
+
+            // Nutrient limits
+            model.constraints["fat"] = { "max": L_fat, "coefficients": {} };
+            I.forEach(function(i) {
+                model.constraints["fat"]["coefficients"]["x_" + i.replace(/"/g, "")] = fat[i];
+            });
+            //*
+            // Repeat for sat_fat, chol, sodium, sugar limits
+            model.constraints["sat_fat"] = { "max": L_sat_fat, "coefficients": {} };
+            I.forEach(function(i) {
+                model.constraints["sat_fat"]["coefficients"]["x_" + i.replace(/"/g, "")] = sat_fat[i];
+            });
+
+            model.constraints["chol"] = { "max": L_chol , "coefficients": {}};
+            I.forEach(function(i) {
+                model.constraints["chol"]["coefficients"]["x_" + i.replace(/"/g, "")] = chol[i];
+            });
+
+            model.constraints["sodium"] = { "max": L_sodium , "coefficients": {}};
+            I.forEach(function(i) {
+                model.constraints["sodium"]["coefficients"]["x_" + i.replace(/"/g, "")] = sodium[i];
+            });
+
+            model.constraints["sugar"] = { "max": L_sugar , "coefficients": {}};
+            I.forEach(function(i) {
+                model.constraints["sugar"]["coefficients"]["x_" + i.replace(/"/g, "")] = sugar[i];
+            });
+
+            /*
+
+            // User preference constraints
+            model.constraints["spicy"] = { "min": T_spicy, "coefficients": {} };
+            I.forEach(function(i) {
+                model.constraints["spicy"]["coefficients"]["x_" + i.replace(/"/g, "")] = spicy[i];
+            });
+
+            // Repeat for sweet, salty, sour preferences
+            model.constraints["sweet"] = { "min": T_sweet, "coefficients": {} };
+            I.forEach(function(i) {
+                model.constraints["sweet"]["coefficients"]["x_" + i.replace(/"/g, "")] = sweet[i];
+            });
+
+            model.constraints["salty"] = { "min": T_salty, "coefficients": {} };
+            I.forEach(function(i) {
+                model.constraints["salty"]["coefficients"]["x_" + i.replace(/"/g, "")] = salty[i];
+            });
+
+            model.constraints["sour"] = { "min": T_sour, "coefficients": {} };
+            I.forEach(function(i) {
+                model.constraints["sour"]["coefficients"]["x_" + i.replace(/"/g, "")] = sour[i];
+            });
+            */
+            /*
+            // Modify the objective function to include penalties for slack variables
+            model.optimize = "total_cost";
+            model.opType = "min";
+            model.variables.total_cost = { cost: 1 };
+            //model.variables.total_cost = {};
+
+            // Define penalty values for each constraint violation
+            var penalties = {
+                energy: 100,
+                carb: 100,
+                protein: 10,
+                fat: 100,
+                fiber: 100,
+                calcium: 100,
+                sat_fat: 100,
+                chol: 100,
+                sodium: 100,
+                sugar: 100
+            };
+
+            // Define slack variables for soft constraints and add them to the model
+            Object.keys(penalties).forEach(function(nutrient) {
+                var slackVariable = "slack_" + nutrient;
+                model.variables[slackVariable] = { "cost": penalties[nutrient] };
+                //console.log(model.ints);
+                model.ints[slackVariable] = 1; // Assuming slack variables are integers
+            });
+            
+
+            // Modify the constraints to include slack variables and penalties
+            // Nutrient requirements
+            model.constraints["energy"] = { "min": E, "coefficients": { "slack_energy": 1 } };
+            I.forEach(function(i) {
+                model.constraints["energy"]["coefficients"]["x_" + i] = e[i];
+            });
+
+            
+            // Repeat for carb, protein, fiber, calcium requirements
+            model.constraints["carb"] = { "min": N_carb, "coefficients": { "slack_carb": 1 } };
+            I.forEach(function(i) {
+                model.constraints["carb"]["coefficients"]["x_" + i] = carb[i];
+            });
+
+            model.constraints["protein"] = { "min": N_protein, "coefficients": { "slack_protein": 1 } };
+            I.forEach(function(i) {
+            model.constraints["protein"]["coefficients"]["x_" + i] = protein[i];
+            });
+
+            model.constraints["fiber"] = { "min": N_fat, "coefficients": { "slack_fiber": 1 } };
+            I.forEach(function(i) {
+            model.constraints["fiber"]["coefficients"]["x_" + i] = fiber[i];
+            });
+
+            model.constraints["calcium"] = { "min": N_calcium, "coefficients": { "slack_calcium": 1 } };
+            I.forEach(function(i) {
+            model.constraints["calcium"]["coefficients"]["x_" + i] = calcium[i];
+            });
+
+            // Nutrient limits
+            model.constraints["fat"] = { "max": L_fat, "coefficients": { "slack_fat": -1 } };
+            I.forEach(function(i) {
+            model.constraints["fat"]["coefficients"]["x_" + i] = fat[i];
+            });
+
+            // Repeat for sat_fat, chol, sodium, sugar limits
+            model.constraints["sat_fat"] = { "max": L_sat_fat, "coefficients": { "slack_sat_fat": -1 } };
+            I.forEach(function(i) {
+            model.constraints["sat_fat"]["coefficients"]["x_" + i] = sat_fat[i];
+            });
+
+            model.constraints["chol"] = { "max": L_chol, "coefficients": { "slack_chol": -1 } };
+            I.forEach(function(i) {
+            model.constraints["chol"]["coefficients"]["x_" + i] = chol[i];
+            });
+
+            model.constraints["sodium"] = { "max": L_sodium, "coefficients": { "slack_sodium": -1 } };
+            I.forEach(function(i) {
+            model.constraints["sodium"]["coefficients"]["x_" + i] = sodium[i];
+            });
+
+            model.constraints["sugar"] = { "max": L_sugar, "coefficients": { "slack_sugar": -1 } };
+            I.forEach(function(i) {
+            model.constraints["sugar"]["coefficients"]["x_" + i] = sugar[i];
+            });
+
+            // Add the penalties for slack variables to the objective function
+            Object.keys(penalties).forEach(function(nutrient) {
+                model.variables.total_cost["slack_" + nutrient] = penalties[nutrient];
+            });
+
+            
+            // Define penalty values for user preference constraint violations
+            var userPreferencePenalties = {
+                spicy: 500,
+                sweet: 500,
+                salty: 500,
+                sour: 500
+            };
+
+            // Define slack variables for user preference soft constraints and add them to the model
+            Object.keys(userPreferencePenalties).forEach(function(preference) {
+                model.variables["slack_" + preference] = { cost: userPreferencePenalties[preference] };
+                model.ints["slack_" + preference] = 1; // Assuming slack variables are integers
+                    // Add the penalties for user preference slack variables to the objective function
+                model.variables.total_cost["slack_" + preference] = userPreferencePenalties[preference];
+            });
+
+            // Modify the user preference constraints to include slack variables and penalties
+            model.constraints["spicy"] = { "min": T_spicy, "coefficients": { "slack_spicy": 1 } };
+            I.forEach(function(i) {
+            model.constraints["spicy"]["coefficients"]["x_" + i] = spicy[i];
+            });
+
+            // Repeat for sweet, salty, sour preferences
+            model.constraints["sweet"] = { "min": T_sweet, "coefficients": { "slack_sweet": 1 } };
+            I.forEach(function(i) {
+            model.constraints["sweet"]["coefficients"]["x_" + i] = sweet[i];
+            });
+
+            model.constraints["salty"] = { "min": T_salty, "coefficients": { "slack_salty": 1 } };
+            I.forEach(function(i) {
+            model.constraints["salty"]["coefficients"]["x_" + i] = salty[i];
+            });
+
+            model.constraints["sour"] = { "min": T_sour, "coefficients": { "slack_sour": 1 } };
+            I.forEach(function(i) {
+            model.constraints["sour"]["coefficients"]["x_" + i] = sour[i];
+            });
+
+            // Add the penalties for slack variables to the objective function
+            Object.keys(penalties).forEach(function(nutrient) {
+                model.variables.total_cost["slack_" + nutrient] = penalties[nutrient];
+            });
+            */
+
+            //console.log(lpModel);
+            console.log(model.constraints)
+            console.log(model.variables);
+
+            // Solve the model
+            var results = solver.Solve(model);
+
+            console.log(results);
+
+            // Return the result or any relevant output
+            let status = results.feasible ? "Optimal" : "Not Optimal";
+            let cost = 0;
+            let optimalMenu = [];
+
+            if (model && model.variables) {
+                var costValue = results.result;
+                console.log('The cost of the solution is:', costValue);
+            } else {
+                console.log('model or model.variables is undefined');
+            }
+
+            let restaurant_no = 0;
+
+            for (let key in results) {
+                if (
+                    key !== "feasible" &&
+                    key !== "result" &&
+                    key !== "bounded" &&
+                    key !== "isIntegral" &&
+                    results[key] > 0
+                ) {
+                    let i = key.slice(2);;
+                    console.log(i);
+                    console.log(c[i]);
+                    let dishDetails = {
+                    dish: i,
+                    restaurant: dish_restaurant[i],
+                    price: c[i],
+                    energy: e[i],
+                    carbohydrate: carb[i],
+                    protein: protein[i],
+                    fat: fat[i],
+                    saturatedFat: sat_fat[i],
+                    cholesterol: chol[i],
+                    fiber: fiber[i],
+                    sugar: sugar[i],
+                    calcium: calcium[i],
+                    sodium: sodium[i],
+                    spicy: spicy[i],
+                    sweet: sweet[i],
+                    salty: salty[i],
+                    sour: sour[i],
+                    vegetarian: vegetarian[i],
+                    gluten: gluten[i],
+                    milk: milk[i],
+                    egg: egg[i],
+                    fish: fish[i],
+                    crustaceans: crustaceans[i]
+                    };
+                    restaurant_no = dish_restaurant[i];
+                    optimalMenu.push(dishDetails);
+                    cost += c[i];
+                }
+            }
+
+            return { status: status, optimalMenu: optimalMenu, totalCost: cost, restaurantNumber:restaurant_no };
+        }
+
+        function test_milpModel(E, N_carb, N_protein, N_fat, N_fiber, N_calcium, L_carb, L_protein, L_fat, 
+            L_sat_fat, L_chol, L_sodium, L_sugar, T_spicy, T_sweet, T_salty, T_sour, 
+            P_restaurant, P_mainFoodType, P_mainIngredients, L_vegetarian, L_gluten, L_milk, L_egg, L_fish, L_crustaceans, 
+            I_strictNutrientMode, I_strictPreferenceMode, I_cost, I_energy, I_carb, I_protein, I_fat, 
+            I_sat_fat, I_chol, I_fiber, I_sugar, I_calcium, I_sodium, I_spicy, I_sweet, I_salty, I_sour, 
+            I_mainFood, I_mainIngredient, I_restaurant, I_vegetarian, I_gluten, I_milk, I_egg, I_fish, I_crustaceans,
+             I_dishRestaurant, I_itemType) {
+                
+            E *= 0.4;
+            N_carb *= 0.4;
+            N_protein *= 0.4;
+            N_fat *= 0.4;
+            N_fiber *= 0.4;
+            N_calcium *= 0.4;
+            L_carb *= 0.4;
+            L_fat *= 0.4;
+            L_sat_fat *= 0.4;
+            L_chol *= 0.4;
+            L_sodium *= 0.4;
+            L_sugar *= 0.4;
+
+            var I = [...new Set(data.map(item => item['English Name']))]; // Set of dishes
+            I = I.map(item => item.replace(/"/g, "")); // Remove single quotes from dish names
+            I = I.filter(item => item !== null); // Remove elements with a value of NaN
+            var J = [...new Set(data.map(item => item['Restaurant']))]; // Set of restaurants
+            J = J.filter(item => item !== null); // Remove elements with a value of NaN
+
+            if(I_dishRestaurant)
+                // Filter the dishes based on the specified restaurant
+                var I = [...new Set(data
+                    .filter(item => item['Restaurant'] === P_restaurant && item['English Name'] !== null)
+                    .map(item => item['English Name'].replace(/"/g, "")))];
+            //console.log(J);
+
+            var c = Object.fromEntries(data.map(item => {
+                const price = parseFloat(item['price'].trim());
+                return [item['English Name'].replace(/"/g, ""), isNaN(price) ? 0 : price]; // If the price isn't a number, default to 0
+            }));
+            //console.log(c);
+            var e = Object.fromEntries(data.map(item => [item['English Name'].replace(/"/g, ""), parseFloat(item['Energy (kcal)'])]));
+            var carb = Object.fromEntries(data.map(item => [item['English Name'].replace(/"/g, ""), parseFloat(item['Total Carbohydrate'])]));
+            var protein = Object.fromEntries(data.map(item => [item['English Name'].replace(/"/g, ""), parseFloat(item['Protein'])]));
+            var fat = Object.fromEntries(data.map(item => [item['English Name'].replace(/"/g, ""), parseFloat(item['Total Fat'])]));
+            var sat_fat = Object.fromEntries(data.map(item => [item['English Name'].replace(/'/g, ""), parseFloat(item['Saturated Fat'])]));
+            var chol = Object.fromEntries(data.map(item => [item['English Name'].replace(/"/g, ""), parseFloat(item['Chol'])]));
+            var fiber = Object.fromEntries(data.map(item => [item['English Name'].replace(/"/g, ""), parseFloat(item['Total Dietary Fiber'])]));
+            var sugar = Object.fromEntries(data.map(item => [item['English Name'].replace(/"/g, ""), parseFloat(item['Total Sugars'])]));
+            var calcium = Object.fromEntries(data.map(item => [item['English Name'].replace(/"/g, ""), parseFloat(item['Calcium'])]));
+            var sodium = Object.fromEntries(data.map(item => [item['English Name'].replace(/"/g, ""), parseFloat(item['Sodium'])]));
+            var main_food = Object.fromEntries(data.map(item => [item['English Name'].replace(/"/g, ""), item['Item type'] === 1 ? 1 : 0])); // Main food indicator of each dish
+            var main_ingredient = Object.fromEntries(data.map(item => [item['English Name'].replace(/"/g, ""), parseInt(item['ingredient_category'])]));
+            var spicy = Object.fromEntries(data.map(item => [item['English Name'].replace(/"/g, ""), item['spicy'] === 'TRUE' ? 1 : 0]));
+            var sweet = Object.fromEntries(data.map(item => [item['English Name'].replace(/"/g, ""), item['sweet'] === 'TRUE' ? 1 : 0]));
+            var salty = Object.fromEntries(data.map(item => [item['English Name'].replace(/"/g, ""), item['salty'] === 'TRUE' ? 1 : 0]));
+            var sour = Object.fromEntries(data.map(item => [item['English Name'].replace(/"/g, ""), item['sour'] === 'TRUE' ? 1 : 0]));
+            var vegetarian = Object.fromEntries(data.map(item => [item['English Name'].replace(/"/g, ""), item['vegetarian'] === 'TRUE' ? 1 : 0]));
+            var gluten = Object.fromEntries(data.map(item => [item['English Name'].replace(/"/g, ""), item['gluten'] === 'TRUE' ? 1 : 0]));
+            var milk = Object.fromEntries(data.map(item => [item['English Name'].replace(/"/g, ""), item['milk'] === 'TRUE' ? 1 : 0]));
+            var egg = Object.fromEntries(data.map(item => [item['English Name'].replace(/"/g, ""), item['egg'] === 'TRUE' ? 1 : 0]));
+            //console.log(egg);
+            var fish = Object.fromEntries(data.map(item => [item['English Name'].replace(/"/g, ""), item['fish'] === 'TRUE' ? 1 : 0]));
+            var crustaceans = Object.fromEntries(data.map(item => [item['English Name'].replace(/"/g, ""), item['crustaceans'] === 'TRUE' ? 1 : 0]));
+
+            var dish_restaurant = Object.fromEntries(data.map(item => [item['English Name'].replace(/"/g, ""), parseInt(item['Restaurant']), item != null])); // Dictionary that maps the dish name to the restaurant number
+            //console.log(dish_restaurant);
+            var S = 2; // Maximum number of snacks
+
+            //var c = Object.fromEntries(data.map(item => [item['English Name'], item['price']])); // Price of each dish
+
+            var item_type = Object.fromEntries(data.map(item => [item['English Name'].replace(/"/g, ""), item['Item type'] === 1 ? 1 : 0])); // Item type of each dish
+
+            // Implement the logic of the MILP model using the input variables
+
+            //var solver = require('jsLPSolver');
+            //console.log(c);
+            //console.log(item_type);
+
+            // Define the decision variables and the objective function
+            if (I_cost)
+                var model = {
+                    "optimize": "cost",
+                    "opType": "min",
+                    "constraints": {},
+                    "variables": {},
+                    "ints": {}
+                };
+            else
+                var model = {
+                        "constraints": {},
+                        "variables": {},
+                        "ints": {}
+                    };
+
+            I.pop();
+            J.pop();
+
+            //console.log(I);
+
+            // Adding the binary variables for dishes
+            I.forEach(function(i) {
+                var variableName = "x_" + i.replace(/"/g, "");
+                model.variables[variableName] = {
+                    cost: c[i],
+                    energy: e[i],
+                    carb: carb[i],
+                    protein: protein[i],
+                    fat: fat[i],
+                    sat_fat: sat_fat[i],
+                    chol: chol[i],
+                    fiber: fiber[i],
+                    sugar: sugar[i],
+                    calcium: calcium[i],
+                    sodium: sodium[i],
+                    main_food: main_food[i],
+                    main_ingredient: main_ingredient[i],
+                    spicy: spicy[i],
+                    sweet: sweet[i],
+                    salty: salty[i],
+                    sour: sour[i],
+                    vegetarian: vegetarian[i],
+                    gluten: gluten[i],
+                    milk: milk[i],
+                    egg: egg[i],
+                    fish: fish[i],
+                    crustaceans: crustaceans[i],
+                    dish_restaurant: dish_restaurant[i],
+                    item_type: item_type[i],
+                    // Add other relevant properties here
+                };
+                model.ints[variableName] = 1;
+            });
+
+            //console.log(J);
+
+            // Adding the binary variables for restaurants
+
+            J.forEach(function(j) {
+                var variableName = "y_" + j;
+                model.variables[variableName] = {};
+                model.ints[variableName] = 1;
+            });
+
+            // Other constraints 
+            if (I_mainFood){
+                model.constraints["main_food"] = { "equal": 1, "coefficients": {} };
+                I.forEach(function(i) {
+                    if (main_food[i]) {
+                        model.constraints["main_food"]["coefficients"]["x_" + i] = main_food[i];
+                    }
+                });
+            }
+
+            if (I_restaurant){
+                model.constraints["restaurant_selection"] = { "equal": 1, "coefficients": {} };
+                J.forEach(function(j) {
+                    model.constraints["restaurant_selection"]["coefficients"]["y_" + j] = 1;
+                });
+
+                I.forEach(function(i) {
+                    var dishVariable = "x_" + i.replace(/"/g, ""); // Dish variable name
+                    var restaurantVariable = "y_" + dish_restaurant[i]; // Corresponding restaurant variable name
+
+                    // Add constraint: if dish is chosen, corresponding restaurant must be chosen
+                    model.constraints[dishVariable + "_implies_" + restaurantVariable] = {
+                        "min": 0,
+                        "max": 1,
+                        "coefficients": {}
+                    };
+                    model.constraints[dishVariable + "_implies_" + restaurantVariable]["coefficients"][dishVariable] = -1;
+                    model.constraints[dishVariable + "_implies_" + restaurantVariable]["coefficients"][restaurantVariable] = 1;
+                });
+            }
+            
+            if (I_mainIngredient) {
+                I.forEach(function (i) {
+                    var dishVariable = "x_" + i.replace(/"/g, ""); // Dish variable name
+                    
+                    model.constraints["main_ingredient_" + i] = {
+                    "equal": P_mainFoodType === main_ingredient[i] ? 1 : 0,
+                    "coefficients": {}
+                    };
+                    
+                    model.constraints["main_ingredient_" + i]["coefficients"][dishVariable] = 1;
+                });
+            }
+
+            /*
+            // Add constraint: dish restaurant[i] must equal P_restaurant
+            if (I_dishRestaurant) {
+                I.forEach(function (i) {
+                    var dishVariable = "x_" + i.replace(/"/g, ""); // Dish variable name
+                    
+                    model.constraints["dish_restaurant_" + i] = {
+                    //"equal": P_restaurant === dish_restaurant[i] ? 1 : 0,
+                    "equal": P_restaurant,
+                    "coefficients": {}
+                    };
+                    
+                    model.constraints["dish_restaurant_" + i]["coefficients"][dishVariable] = 1;
+                });
+            }
+            */
+
+            if (I_itemType) {
+                I.forEach(function (i) {
+                    var dishVariable = "x_" + i.replace(/"/g, ""); // Dish variable name
+                    
+                    model.constraints["main_ingredient_" + i] = {
+                    "equal": P_mainIngredients === main_food[i] ? 1 : 0,
+                    "coefficients": {}
+                    };
+                    
+                    model.constraints["main_ingredient_" + i]["coefficients"][dishVariable] = 1;
+                });
+            }
+
+            I.forEach(function(i) {
+                if (I_vegetarian){
+                    model.constraints["vegetarian_" + i] = { "min": L_vegetarian, "coefficients": {} };
+                    model.constraints["vegetarian_" + i]["coefficients"]["x_" + i] = vegetarian[i]; 
+                }
+
+                if (I_gluten){
+                    model.constraints["gluten_" + i] = { "max": L_gluten, "coefficients": {} };
+                    model.constraints["gluten_" + i]["coefficients"]["x_" + i] = gluten[i];
+                }
+
+                if (I_milk){
+                    model.constraints["milk_" + i] = { "max": L_milk, "coefficients": {} };
+                    model.constraints["milk_" + i]["coefficients"]["x_" + i] = milk[i];
+                }
+
+                if (I_egg){
+                    model.constraints["egg_" + i] = { "max": L_egg, "coefficients": {} };
+                    model.constraints["egg_" + i]["coefficients"]["x_" + i] = egg[i];
+                }
+
+                if (I_fish){
+                    model.constraints["fish_" + i] = { "max": L_fish, "coefficients": {} };
+                    model.constraints["fish_" + i]["coefficients"]["x_" + i] = fish[i];
+                }
+
+                if (I_crustaceans){
+                    model.constraints["crustaceans_" + i] = { "max": L_crustaceans, "coefficients": {} };
+                    model.constraints["crustaceans_" + i]["coefficients"]["x_" + i] = crustaceans[i];
+                }
+            });
+
+            if (I_strictNutrientMode){
+                // Nutrient requirements
+                if(I_energy){
+                    model.constraints["energy"] = { "min": E, "coefficients": {} };
+                    I.forEach(function(i) {
+                        model.constraints["energy"]["coefficients"]["x_" + i.replace(/"/g, "")] = e[i];
+                    });
+                }
+
+                if(I_carb){
+                    model.constraints["carb"] = { "min": N_carb , "max": L_carb, "coefficients": {}};
+                    I.forEach(function(i) {
+                        model.constraints["carb"]["coefficients"]["x_" + i] = carb[i];
+                    });
+                }
+
+                if(I_protein){
+                    model.constraints["protein"] = { "min": N_protein, "max": L_protein, "coefficients": {} };
+                    I.forEach(function(i) {
+                        model.constraints["protein"]["coefficients"]["x_" + i.replace(/"/g, "")] = protein[i];
+                    });
+                }
+
+                if(I_fat){
+                    model.constraints["fat"] = { "max": L_fat, "coefficients": {} };
+                    I.forEach(function(i) {
+                        model.constraints["fat"]["coefficients"]["x_" + i.replace(/"/g, "")] = fat[i];
+                    });
+                } 
+
+                if(I_fiber){
+                    model.constraints["fiber"] = { "min": N_fat, "max": L_fat, "coefficients": {} };
+                    I.forEach(function(i) {
+                        model.constraints["fiber"]["coefficients"]["x_" + i.replace(/"/g, "")] = fiber[i];
+                    });
+                }       
+  
+                if(I_calcium){
+                    model.constraints["calcium"] = { "min": N_calcium, "coefficients": {} };
+                    I.forEach(function(i) {
+                        model.constraints["calcium"]["coefficients"]["x_" + i.replace(/"/g, "")] = calcium[i];
+                    });
+                }
+
+                if(I_sat_fat){
+                    model.constraints["sat_fat"] = { "max": L_sat_fat, "coefficients": {} };
+                    I.forEach(function(i) {
+                        model.constraints["sat_fat"]["coefficients"]["x_" + i.replace(/"/g, "")] = sat_fat[i];
+                    });
+                }
+
+                if(I_chol){
+                    model.constraints["chol"] = { "max": L_chol , "coefficients": {}};
+                    I.forEach(function(i) {
+                        model.constraints["chol"]["coefficients"]["x_" + i.replace(/"/g, "")] = chol[i];
+                    });
+                }
+
+                if(I_sodium){
+                    model.constraints["sodium"] = { "max": L_sodium , "coefficients": {}};
+                    I.forEach(function(i) {
+                        model.constraints["sodium"]["coefficients"]["x_" + i.replace(/"/g, "")] = sodium[i];
+                    });
+                }
+
+                if(I_sugar){
+                    model.constraints["sugar"] = { "max": L_sugar , "coefficients": {}};
+                    I.forEach(function(i) {
+                        model.constraints["sugar"]["coefficients"]["x_" + i.replace(/"/g, "")] = sugar[i];
+                    });
+                }
+            }
+            else{
+                // Modify the objective function to include penalties for slack variables
+                model.optimize = "total_cost";
+                //model.opType = "min";
+                model.variables.total_cost = { cost: 1 };
+                //model.variables.total_cost = {};
+
+                // Define penalty values for each constraint violation
+                var penalties = {
+                    energy: 10,
+                    carb: 10,
+                    protein: 10,
+                    fat: 10,
+                    fiber: 10,
+                    calcium: 10,
+                    sat_fat: 10,
+                    chol: 10,
+                    sodium: 10,
+                    sugar: 10
+                };
+
+                // Define slack variables for soft constraints and add them to the model
+                if(I_energy || I_carb || I_protein || I_fat || I_fiber || I_calcium || I_sat_fat || I_chol || I_sodium || I_sugar)
+                    Object.keys(penalties).forEach(function(nutrient) {
+                        var slackVariable = "slack_" + nutrient;
+                        model.variables[slackVariable] = { "cost": penalties[nutrient] };
+                        //console.log(model.ints);
+                        model.ints[slackVariable] = 1; // Assuming slack variables are integers
+                    });
+
+                if(I_energy){
+                    // Modify the constraints to include slack variables and penalties
+                    // Nutrient requirements
+                    model.constraints["energy"] = { "min": E, "coefficients": { "slack_energy": 1 } };
+                    I.forEach(function(i) {
+                        model.constraints["energy"]["coefficients"]["x_" + i] = e[i];
+                    });
+                }
+
+                if(I_carb){
+                    model.constraints["carb"] = { "min": N_carb, "coefficients": { "slack_carb": 1 } };
+                    I.forEach(function(i) {
+                        model.constraints["carb"]["coefficients"]["x_" + i] = carb[i];
+                    });
+                }
+
+                if(I_protein){
+                    model.constraints["protein"] = { "min": N_protein, "coefficients": { "slack_protein": 1 } };
+                    I.forEach(function(i) {
+                    model.constraints["protein"]["coefficients"]["x_" + i] = protein[i];
+                    });
+                }
+
+                if(I_fiber){
+                    model.constraints["fiber"] = { "min": N_fat, "max": L_fat, "coefficients": { "slack_fiber": 1 } };
+                    I.forEach(function(i) {
+                    model.constraints["fiber"]["coefficients"]["x_" + i] = fiber[i];
+                    });
+                }
+
+                if(I_calcium){
+                    model.constraints["calcium"] = { "min": N_calcium, "coefficients": { "slack_calcium": 1 } };
+                    I.forEach(function(i) {
+                    model.constraints["calcium"]["coefficients"]["x_" + i] = calcium[i];
+                    });
+                }
+
+                if(I_fat){
+                    model.constraints["sat_fat"] = { "max": L_sat_fat, "coefficients": { "slack_sat_fat": -1 } };
+                    I.forEach(function(i) {
+                    model.constraints["sat_fat"]["coefficients"]["x_" + i] = sat_fat[i];
+                    });
+                }
+
+                if(I_chol){
+                    model.constraints["chol"] = { "max": L_chol, "coefficients": { "slack_chol": -1 } };
+                    I.forEach(function(i) {
+                    model.constraints["chol"]["coefficients"]["x_" + i] = chol[i];
+                    });
+                }
+
+                if(I_sodium){
+                    model.constraints["sodium"] = { "max": L_sodium, "coefficients": { "slack_sodium": -1 } };
+                    I.forEach(function(i) {
+                    model.constraints["sodium"]["coefficients"]["x_" + i] = sodium[i];
+                    });
+                }
+
+                if(I_sugar){
+                    model.constraints["sugar"] = { "max": L_sugar, "coefficients": { "slack_sugar": -1 } };
+                    I.forEach(function(i) {
+                    model.constraints["sugar"]["coefficients"]["x_" + i] = sugar[i];
+                    });
+                }
+
+                // Add the penalties for slack variables to the objective function
+                if(I_energy || I_carb || I_protein || I_fat || I_fiber || I_calcium || I_sat_fat || I_chol || I_sodium || I_sugar)
+                    Object.keys(penalties).forEach(function(nutrient) {
+                        model.variables.total_cost["slack_" + nutrient] = penalties[nutrient];
+                    });
+            }
+            
+            if(I_strictPreferenceMode){
+                // User preference constraints
+                if (I_spicy){
+                    model.constraints["spicy"] = { "min": T_spicy, "coefficients": {} };
+                    I.forEach(function(i) {
+                        model.constraints["spicy"]["coefficients"]["x_" + i.replace(/"/g, "")] = spicy[i];
+                    });
+                }
+
+                if (I_sweet){
+                    model.constraints["sweet"] = { "min": T_sweet, "coefficients": {} };
+                    I.forEach(function(i) {
+                        model.constraints["sweet"]["coefficients"]["x_" + i.replace(/"/g, "")] = sweet[i];
+                    });
+                }
+
+                if (I_salty){
+                    model.constraints["salty"] = { "min": T_salty, "coefficients": {} };
+                    I.forEach(function(i) {
+                        model.constraints["salty"]["coefficients"]["x_" + i.replace(/"/g, "")] = salty[i];
+                    });
+                }
+               
+                if (I_sour){
+                    model.constraints["sour"] = { "min": T_sour, "coefficients": {} };
+                    I.forEach(function(i) {
+                        model.constraints["sour"]["coefficients"]["x_" + i.replace(/"/g, "")] = sour[i];
+                    });
+                }
+            }
+            else{
+                // Modify the objective function to include penalties for slack variables
+                model.optimize = "total_cost";
+                model.opType = "min";
+                model.variables.total_cost = { cost: 1 };
+                //model.variables.total_cost = {};            
+                
+                // Define penalty values for user preference constraint violations
+                var userPreferencePenalties = {
+                    spicy: 1,
+                    sweet: 1,
+                    salty: 1,
+                    sour: 1
+                };
+
+                // Define slack variables for user preference soft constraints and add them to the model
+                if(I_spicy || I_salty || I_sweet || I_sour)
+                    Object.keys(userPreferencePenalties).forEach(function(preference) {
+                        model.variables["slack_" + preference] = { cost: userPreferencePenalties[preference] };
+                        model.ints["slack_" + preference] = 1; // Assuming slack variables are integers
+                            // Add the penalties for user preference slack variables to the objective function
+                        model.variables.total_cost["slack_" + preference] = userPreferencePenalties[preference];
+                    });
+
+                if (I_spicy){
+                    // Modify the user preference constraints to include slack variables and penalties
+                    model.constraints["spicy"] = { "equal": T_spicy, "coefficients": { "slack_spicy": 1 } };
+                    I.forEach(function(i) {
+                    model.constraints["spicy"]["coefficients"]["x_" + i] = spicy[i];
+                    });
+                }
+
+                if (I_sweet){
+                    model.constraints["sweet"] = { "equal": T_sweet, "coefficients": { "slack_sweet": 1 } };
+                    I.forEach(function(i) {
+                    model.constraints["sweet"]["coefficients"]["x_" + i] = sweet[i];
+                    });
+                }
+
+                if (I_salty){
+                    model.constraints["salty"] = { "equal": T_salty, "coefficients": { "slack_salty": 1 } };
+                    I.forEach(function(i) {
+                    model.constraints["salty"]["coefficients"]["x_" + i] = salty[i];
+                    });
+                }
+
+                if (I_sour){
+                    model.constraints["sour"] = { "equal": T_sour, "coefficients": { "slack_sour": 1 } };
+                    I.forEach(function(i) {
+                    model.constraints["sour"]["coefficients"]["x_" + i] = sour[i];
+                    });
+                }
+
+                // Add the penalties for slack variables to the objective function
+                if(I_spicy || I_salty || I_sweet || I_sour)
+                    Object.keys(userPreferencePenalties).forEach(function(preference) {
+                        model.variables.total_cost["slack_" + preference] = userPreferencePenalties[preference];
+                    });
+            }
+
+            //console.log(lpModel);
+            console.log(model.constraints)
+            console.log(model.variables);
+
+            // Solve the model
+            var results = solver.Solve(model);
+
+            console.log(results);
+
+            // Return the result or any relevant output
+            let status = results.feasible ? "Optimal" : "Not Optimal";
+            let cost = 0;
+            let optimalMenu = [];
+
+            if (model && model.variables) {
+                var costValue = results.result;
+                console.log('The cost of the solution is:', costValue);
+            } else {
+                console.log('model or model.variables is undefined');
+            }
+
+            let restaurant_no = 0;
+
+            for (let key in results) {
+                if (
+                    key !== "feasible" &&
+                    key !== "result" &&
+                    key !== "bounded" &&
+                    key !== "isIntegral" &&
+                    results[key] > 0
+                ) {
+                    let i = key.slice(2);;
+                    console.log(i);
+                    console.log(c[i]);
+                    let dishDetails = {
+                    dish: i,
+                    restaurant: dish_restaurant[i],
+                    price: c[i],
+                    energy: e[i],
+                    carbohydrate: carb[i],
+                    protein: protein[i],
+                    fat: fat[i],
+                    saturatedFat: sat_fat[i],
+                    cholesterol: chol[i],
+                    fiber: fiber[i],
+                    sugar: sugar[i],
+                    calcium: calcium[i],
+                    sodium: sodium[i],
+                    spicy: spicy[i],
+                    sweet: sweet[i],
+                    salty: salty[i],
+                    sour: sour[i],
+                    vegetarian: vegetarian[i],
+                    gluten: gluten[i],
+                    milk: milk[i],
+                    egg: egg[i],
+                    fish: fish[i],
+                    crustaceans: crustaceans[i]
+                    };
+                    restaurant_no = dish_restaurant[i];
+                    optimalMenu.push(dishDetails);
+                    cost += c[i];
+                }
+            }
+
+            return { status: status, optimalMenu: optimalMenu, totalCost: cost, restaurantNumber:restaurant_no };
+        }
+
+        function submitForm(event) {
+            console.log("Form submitted");
+            event.preventDefault(); // Prevent form submission
+
+            // Get taste preference values
+            var T_spicy = parseFloat(document.getElementById('taste_spicy').value);
+            var T_sweet = parseFloat(document.getElementById('taste_sweet').value);
+            var T_salty = parseFloat(document.getElementById('taste_salty').value);
+            var T_sour = parseFloat(document.getElementById('taste_sour').value);
+
+            // Get restaurant value
+            var P_restaurant = document.querySelector('input[name="restaurant"]:checked').value;
+
+            // Get main food type value
+            var P_mainFoodType = document.querySelector('input[name="main_food_type"]:checked').value;
+
+            // Get main ingredients values
+            var P_mainIngredients = document.querySelector('input[name="ingredient_category"]:checked').value;
+
+            // Get selected values for dietary limitations
+            var L_vegetarian = document.getElementById('limitation_vegetarian').checked ? 1 : 0;
+            var L_gluten = document.getElementById('limitation_gluten').checked ? 0 : 1;
+            var L_milk = document.getElementById('limitation_milk').checked ? 0 : 1;
+            var L_egg = document.getElementById('limitation_egg').checked ? 0 : 1;
+            var L_fish = document.getElementById('limitation_fish').checked ? 0 : 1;
+            var L_crustaceans = document.getElementById('limitation_crustaceans').checked ? 0 : 1;
+
+            //console.log("T_spicy: " + T_spicy);
+
+            // Get values for internal testing checkboxes
+            var internalTestingMode = document.getElementById('internal_testing_mode').checked ? 1 : 0;
+            var I_strictNutrientMode = document.getElementById('strict_nutrient_mode').checked ? 1 : 0;
+            var I_strictPreferenceMode = document.getElementById('strict_preference_mode').checked ? 1 : 0;
+            var I_cost = document.getElementById('cost').checked ? 1 : 0;
+            var I_energy = document.getElementById('energy').checked ? 1 : 0;
+            var I_carb = document.getElementById('carb').checked ? 1 : 0;
+            var I_protein = document.getElementById('protein').checked ? 1 : 0;
+            var I_fat = document.getElementById('fat').checked ? 1 : 0;
+            var I_sat_fat = document.getElementById('sat_fat').checked ? 1 : 0;
+            var I_chol = document.getElementById('chol').checked ? 1 : 0;
+            var I_fiber = document.getElementById('fiber').checked ? 1 : 0;
+            var I_sugar = document.getElementById('sugar').checked ? 1 : 0;
+            var I_calcium = document.getElementById('calcium').checked ? 1 : 0;
+            var I_sodium = document.getElementById('sodium').checked ? 1 : 0;
+            var I_spicy = document.getElementById('spicy').checked ? 1 : 0;
+            var I_sweet = document.getElementById('sweet').checked ? 1 : 0;
+            var I_salty = document.getElementById('salty').checked ? 1 : 0;
+            var I_sour = document.getElementById('sour').checked ? 1 : 0;
+            var I_mainFood = document.getElementById('main_food').checked ? 1 : 0;
+            var I_mainIngredient = document.getElementById('main_ingredient').checked ? 1 : 0;
+            var I_restaurant = document.getElementById('restaurant').checked ? 1 : 0;
+            var I_vegetarian = document.getElementById('vegetarian').checked ? 1 : 0;
+            var I_gluten = document.getElementById('gluten').checked ? 1 : 0;
+            var I_milk = document.getElementById('milk').checked ? 1 : 0;
+            var I_egg = document.getElementById('egg').checked ? 1 : 0;
+            var I_fish = document.getElementById('fish').checked ? 1 : 0;
+            var I_crustaceans = document.getElementById('crustaceans').checked ? 1 : 0;
+            var I_dishRestaurant = document.getElementById('dish_restaurant').checked ? 1 : 0;
+            var I_itemType = document.getElementById('item_type').checked ? 1 : 0;
+
+            I_vegetarian = L_vegetarian === 0 ? 0 : I_vegetarian;
+            I_gluten = L_gluten === 1 ? I_gluten : 0;
+            I_milk = L_milk === 1 ? I_milk : 0;
+            I_egg = L_egg === 1 ? I_egg : 0;
+            I_fish = L_fish === 1 ? I_fish : 0; 
+            I_crustaceans = L_crustaceans === 1 ? I_crustaceans : 0;
+
+            I_spicy = T_spicy === 0.5 ? 0 : I_spicy;
+            I_sweet = T_sweet === 0.5 ? 0 : I_sweet;
+            I_salty = T_salty === 0.5 ? 0 : I_salty;
+            I_sour = T_sour === 0.5 ? 0 : I_sour;
+
+            var modelResult;
+            // Call the milpModel function and retrieve the result
+            if (internalTestingMode) {
+                // Run test_milpModel function
+                modelResult = test_milpModel(E, N_carbohydrates, N_protein, N_fats, N_fiber,
+                    N_calcium, L_carbohydrates, L_protein, L_fats, L_sat_fat, L_chol, L_sodium, L_sugar, 
+                    T_spicy, T_sweet, T_salty, T_sour, P_restaurant, P_mainFoodType, P_mainIngredients, 
+                    L_vegetarian, L_gluten, L_milk, L_egg, L_fish, L_crustaceans,
+                    I_strictNutrientMode, I_strictPreferenceMode, I_cost, 
+                    I_energy, I_carb, I_protein, I_fat, I_sat_fat, I_chol, I_fiber, 
+                    I_sugar, I_calcium, I_sodium, I_spicy, I_sweet, I_salty, I_sour, I_mainFood, I_mainIngredient, I_restaurant,
+                    I_vegetarian, I_gluten, I_milk, I_egg, I_fish, I_crustaceans, I_dishRestaurant, I_itemType);
+                }
+            else{
+                modelResult = milpModel(E, N_carbohydrates, N_protein, N_fats, N_fiber, 
+                    N_calcium, L_carbohydrates, L_protein, L_fats, L_sat_fat, L_chol, L_sodium, L_sugar, 
+                    T_spicy, T_sweet, T_salty, T_sour, P_restaurant, P_mainFoodType, P_mainIngredients, 
+                    L_vegetarian, L_gluten, L_milk, L_egg, L_fish, L_crustaceans);
+            };
+                //console.log(modelResult);
+                // Update the additional nutrient values and percentages
+                const saturatedFatIntake = modelResult.optimalMenu.reduce((total, dish) => total + (isNaN(dish.saturatedFat) ? 0 : dish.saturatedFat), 0);
+                const cholesterolIntake = modelResult.optimalMenu.reduce((total, dish) => total + (isNaN(dish.cholesterol) ? 0 : dish.cholesterol), 0);
+                const sugarIntake = modelResult.optimalMenu.reduce((total, dish) => total + (isNaN(dish.sugar) ? 0 : dish.sugar), 0);
+                const sodiumIntake = modelResult.optimalMenu.reduce((total, dish) => total + (isNaN(dish.sodium) ? 0 : dish.sodium), 0);
+
+                const saturatedFatPercentage = (saturatedFatIntake / L_sat_fat) * 100;
+                const cholesterolPercentage = (cholesterolIntake / L_chol) * 100;
+                const sugarPercentage = (sugarIntake / L_sugar) * 100;
+                const sodiumPercentage = (sodiumIntake / L_sodium) * 100;
+
+                // Retrieve the nutrient values from modelResult
+                const energyIntake = modelResult.optimalMenu.reduce((total, dish) => total + dish.energy, 0);
+                //console.log(energyIntake);
+                const proteinIntake = modelResult.optimalMenu.reduce((total, dish) => total + dish.protein, 0);
+                const fatsIntake = modelResult.optimalMenu.reduce((total, dish) => total + dish.fat, 0);
+                const carbohydratesIntake = modelResult.optimalMenu.reduce((total, dish) => total + dish.carbohydrate, 0);
+                const fiberIntake = modelResult.optimalMenu.reduce((total, dish) => total + dish.fiber, 0);
+                const calciumIntake = modelResult.optimalMenu.reduce((total, dish) => total + dish.calcium, 0);
+
+                var restaurantNumberElement = document.getElementById("restaurant-number");
+                var statusElement = document.getElementById("status");
+                //var totalCostElement = document.getElementById("total-cost");
+
+                restaurantNumberElement.textContent =  modelResult.restaurantNumber;
+
+                // Display the status and total cost
+                statusElement.textContent = modelResult.status;
+                //totalCostElement.textContent = modelResult.totalCost;
+
+                // Calculate the nutrient percentages
+                const energyPercentage = (energyIntake / E) * 100;
+                const proteinPercentage = (proteinIntake / N_protein) * 100;
+                const fatsPercentage = (fatsIntake / N_fats) * 100;
+                const carbohydratesPercentage = (carbohydratesIntake / N_carbohydrates) * 100;
+                const fiberPercentage = (fiberIntake / N_fiber) * 100;
+                const calciumPercentage = (calciumIntake / N_calcium) * 100;
+
+                // Set the nutrient intake and percentage values in the table
+                document.getElementById("meal_energy").textContent = energyIntake;
+                document.getElementById("meal_energy_percentage").textContent = energyPercentage.toFixed(2) + "%";
+                document.getElementById("meal_protein").textContent = proteinIntake;
+                document.getElementById("meal_protein_percentage").textContent = proteinPercentage.toFixed(2) + "%";
+                document.getElementById("meal_fats").textContent = fatsIntake;
+                document.getElementById("meal_fats_percentage").textContent = fatsPercentage.toFixed(2) + "%";
+                document.getElementById("meal_carbohydrates").textContent = carbohydratesIntake;
+                document.getElementById("meal_carbohydrates_percentage").textContent = carbohydratesPercentage.toFixed(2) + "%";
+                document.getElementById("meal_fiber").textContent = fiberIntake;
+                document.getElementById("meal_fiber_percentage").textContent = fiberPercentage.toFixed(2) + "%";
+                document.getElementById("meal_calcium").textContent = calciumIntake;
+                document.getElementById("meal_calcium_percentage").textContent = calciumPercentage.toFixed(2) + "%";
+
+                document.querySelector("#meal_saturatedFat").textContent = saturatedFatIntake;
+                document.querySelector("#meal_saturatedFat_percentage").textContent = saturatedFatPercentage.toFixed(2) + "%";
+                document.querySelector("#meal_cholesterol").textContent = cholesterolIntake;
+                document.querySelector("#meal_cholesterol_percentage").textContent = cholesterolPercentage.toFixed(2) + "%";
+                document.querySelector("#meal_sugar").textContent = sugarIntake;
+                document.querySelector("#meal_sugar_percentage").textContent = sugarPercentage.toFixed(2) + "%";
+                document.querySelector("#meal_sodium").textContent = sodiumIntake;
+                document.querySelector("#meal_sodium_percentage").textContent = sodiumPercentage.toFixed(2) + "%";
+
+
+                // Get references to the HTML elements
+                const tableBody = document.querySelector("#recommended-dishes-table tbody");
+
+                // Clear the table by removing all existing rows
+                while (tableBody.firstChild) {
+                    tableBody.removeChild(tableBody.firstChild);
+                }
+
+                // Display the recommended dishes in the table
+                for (let dish of modelResult.optimalMenu) {
+                    // Create a new table row
+                    const row = document.createElement("tr");
+
+                    // Create table cells and set their content
+                    const dishCell = document.createElement("td");
+                    dishCell.textContent = dish.dish;
+                    row.appendChild(dishCell);
+
+                    const priceCell = document.createElement("td");
+                    priceCell.textContent = dish.price;
+                    row.appendChild(priceCell);
+
+                    // Add more cells for other dish details as needed
+
+                    // Append the row to the table body
+                    tableBody.appendChild(row);
+                }
+        }
+</script>
+</head>
+<body>
+    <h1>Meal Recommendations</h1>
+
+    <!-- Display user's daily nutrient intake (from cookies) -->
+    <h2>Daily Nutrient Intake</h2>
+    <table>
+        <tr>
+            <th>Nutrient</th>
+            <th>Daily Requirement</th>
+            <th>Daily Upper Tolerance</th>
+            <th>Intake in the Meal</th>
+            <th>% Intake in the Meal</th>
+        </tr>
+        <tr>
+            <td>Energy</td>
+            <td id="energy"></td>
+            <td>/</td>
+            <td id="meal_energy"></td>
+            <td id="meal_energy_percentage"></td>
+        </tr>
+        <tr>
+            <td>Protein</td>
+            <td id="N_protein"></td>
+            <td id="L_protein"></td>
+            <td id="meal_protein"></td>
+            <td id="meal_protein_percentage"></td>
+        </tr>
+        <tr>
+            <td>Fats</td>
+            <td id="N_fats"></td>
+            <td id="L_fats"></td>
+            <td id="meal_fats"></td>
+            <td id="meal_fats_percentage"></td>
+        </tr>
+        <tr>
+            <td>Carbohydrates</td>
+            <td id="N_carbohydrates"></td>
+            <td id="L_carbohydrates"></td>
+            <td id="meal_carbohydrates"></td>
+            <td id="meal_carbohydrates_percentage"></td>
+        </tr>
+        <tr>
+            <td>Fiber</td>
+            <td id="fiber"></td>
+            <td>/</td>
+            <td id="meal_fiber"></td>
+            <td id="meal_fiber_percentage"></td>
+        </tr>
+        <tr>
+            <td>Calcium</td>
+            <td id="calcium"></td>
+            <td>/</td>
+            <td id="meal_calcium"></td>
+            <td id="meal_calcium_percentage"></td>
+        </tr>
+        <tr>
+            <td>Saturated Fat</td>
+            <td>/</td>
+            <td id="saturatedFat"></td>
+            <td id="meal_saturatedFat"></td>
+            <td id="meal_saturatedFat_percentage"></td>
+        </tr>
+        <tr>
+            <td>Cholesterol</td>
+            <td>/</td>
+            <td id="cholesterol"></td>
+            <td id="meal_cholesterol"></td>
+            <td id="meal_cholesterol_percentage"></td>
+        </tr>
+        <tr>
+            <td>Sugar</td>
+            <td>/</td>
+            <td id="sugar"></td>
+            <td id="meal_sugar"></td>
+            <td id="meal_sugar_percentage"></td>
+        </tr>
+        <tr>
+            <td>Sodium</td>
+            <td>/</td>
+            <td id="sodium"></td>
+            <td id="meal_sodium"></td>
+            <td id="meal_sodium_percentage"></td>
+        </tr>
+    </table>
+
+    <!-- Preference Section -->
+    <h2>Preference</h2>
+    <!-- Add your preference elements here -->
+
+    <!-- Taste Section -->
+    <h3>Taste</h3>
+    <form onsubmit="submitForm(event)">
+        <div class="scrollable-taste">
+            <label for="taste_spicy">Spicy:</label>
+            <input type="range" id="taste_spicy" min="0" max="1" step="0.1" value="0.5">
+
+            <label for="taste_sweet">Sweet:</label>
+            <input type="range" id="taste_sweet" min="0" max="1" step="0.1" value="0.5">
+
+            <label for="taste_salty">Salty:</label>
+            <input type="range" id="taste_salty" min="0" max="1" step="0.1" value="0.5">
+
+            <label for="taste_sour">Sour:</label>
+            <input type="range" id="taste_sour" min="0" max="1" step="0.1" value="0.5">
+        </div>
+
+        <!-- Restaurant Section -->
+        <h3>Restaurant</h3>
+        <label for="restaurant_mcdonalds">McDonald's:</label>
+        <input type="radio" id="restaurant_mcdonalds" name="restaurant" value="1">
+
+        <label for="restaurant_hk_tea">Hong Kong-style Tea:</label>
+        <input type="radio" id="restaurant_hk_tea" name="restaurant" value="2" checked>
+
+        <label for="restaurant_subway">Subway:</label>
+        <input type="radio" id="restaurant_subway" name="restaurant" value="3">
+
+        <label for="restaurant_dimsum">Dimsum:</label>
+        <input type="radio" id="restaurant_dimsum" name="restaurant" value="4">
+
+        <!-- Main Food Type Section -->
+        <h3>Main Food Type</h3>
+        <label for="main_food_type_bread">Bread:</label>
+        <input type="radio" id="main_food_type_bread" name="main_food_type" value="1">
+
+        <label for="main_food_type_noodle">Noodle:</label>
+        <input type="radio" id="main_food_type_noodle" name="main_food_type" value="2">
+
+        <label for="main_food_type_rice">Rice:</label>
+        <input type="radio" id="main_food_type_rice" name="main_food_type" value="3" checked>
+
+        <label for="main_food_type_salad">Salad:</label>
+        <input type="radio" id="main_food_type_salad" name="main_food_type" value="4">
+
+        <label for="main_food_type_sandwich">Sandwich:</label>
+        <input type="radio" id="main_food_type_sandwich" name="main_food_type" value="5">
+
+        <label for="main_food_type_other">Other:</label>
+        <input type="radio" id="main_food_type_other" name="main_food_type" value="6">
+
+        <!-- Ingredient Category Section -->
+        <h3>Ingredient Category</h3>
+        <label for="ingredient_category_pork">Pork:</label>
+        <input type="radio" id="ingredient_category_pork" name="ingredient_category" value="1" checked>
+
+        <label for="ingredient_category_beef">Beef:</label>
+        <input type="radio" id="ingredient_category_beef" name="ingredient_category" value="2">
+
+        <label for="ingredient_category_chicken">Chicken:</label>
+        <input type="radio" id="ingredient_category_chicken" name="ingredient_category" value="3">
+
+        <label for="ingredient_category_egg">Egg:</label>
+        <input type="radio" id="ingredient_category_egg" name="ingredient_category" value="4">
+
+        <label for="ingredient_category_seafood">Seafood:</label>
+        <input type="radio" id="ingredient_category_seafood" name="ingredient_category" value="5">
+
+        <label for="ingredient_category_coffee">Coffee:</label>
+        <input type="radio" id="ingredient_category_coffee" name="ingredient_category" value="6">
+
+        <label for="ingredient_category_tea">Tea:</label>
+        <input type="radio" id="ingredient_category_tea" name="ingredient_category" value="7">
+
+        <label for="ingredient_category_vegetables">Vegetables:</label>
+        <input type="radio" id="ingredient_category_vegetables" name="ingredient_category" value="8">
+
+        <label for="ingredient_category_fruits">Fruits:</label>
+        <input type="radio" id="ingredient_category_fruits" name="ingredient_category" value="9">
+
+        <label for="ingredient_category_milk">Milk:</label>
+        <input type="radio" id="ingredient_category_milk" name="ingredient_category" value="10">
+
+        <label for="ingredient_category_other">Other:</label>
+        <input type="radio" id="ingredient_category_other" name="ingredient_category" value="11">
+
+        <!-- Dietary Limitations Section -->
+        <h3>Dietary Limitations</h3>
+        <label for="limitation_vegetarian">Vegetarian:</label>
+        <input type="checkbox" id="limitation_vegetarian">
+
+        <label for="limitation_gluten">Gluten-free:</label>
+        <input type="checkbox" id="limitation_gluten">
+
+        <label for="limitation_milk">Milk-free:</label>
+        <input type="checkbox" id="limitation_milk">
+
+        <label for="limitation_egg">Egg-free:</label>
+        <input type="checkbox" id="limitation_egg">
+
+        <label for="limitation_fish">Fish-free:</label>
+        <input type="checkbox" id="limitation_fish">
+
+        <label for="limitation_crustaceans">Crustaceans-free:</label>
+        <input type="checkbox" id="limitation_crustaceans">
+
+        <button type="submit">Submit</button>
+
+         <!-- Internal Testing Area -->
+        <h3>Internal Testing</h2>
+
+        <!-- Checkbox: Strict Nutrient Mode -->
+        <label>
+            <input type="checkbox" id="internal_testing_mode" checked/> Internal Testing Mode
+        </label>
+
+        <label>
+        <input type="checkbox" id="strict_nutrient_mode" checked/> Strict Nutrient Mode 
+        </label>
+
+        <!-- Checkboxes: Items Below -->
+        <label>
+        <input type="checkbox" id="cost" checked/> Cost
+        </label>
+        <br />
+
+        <label>
+        <input type="checkbox" id="energy" checked/> Energy
+        </label>
+
+        <label>
+        <input type="checkbox" id="carb" checked/> Carb
+        </label>
+
+        <label>
+        <input type="checkbox" id="protein" checked/> Protein
+        </label>
+
+        <label>
+        <input type="checkbox" id="fat" checked/> Fat
+        </label>
+        <br />
+
+        <label>
+        <input type="checkbox" id="sat_fat" checked/> Saturated Fat
+        </label>
+
+        <label>
+        <input type="checkbox" id="chol" checked/> Cholesterol
+        </label>
+
+        <label>
+        <input type="checkbox" id="fiber" checked/> Fiber
+        </label>
+
+        <label>
+        <input type="checkbox" id="sugar" checked/> Sugar
+        </label>
+
+        <label>
+        <input type="checkbox" id="calcium" checked/> Calcium
+        </label>
+
+        <label>
+        <input type="checkbox" id="sodium" checked/> Sodium
+        </label>
+        <br /><br />
+
+        <!-- Checkbox: Strict Preference Mode -->
+        <label>
+        <input type="checkbox" id="strict_preference_mode" /> Strict Preference Mode
+        </label>
+        <br />
+
+        <!-- Checkboxes: Spicy, Sweet, Salty, Sour -->
+        <label>
+        <input type="checkbox" id="spicy"/> Spicy
+        </label>
+
+        <label>
+        <input type="checkbox" id="sweet"/> Sweet
+        </label>
+
+        <label>
+        <input type="checkbox" id="salty"/> Salty
+        </label>
+
+        <label>
+        <input type="checkbox" id="sour"/> Sour
+        </label>
+        <br />
+
+        <!-- Checkboxes: Main Food, Main Ingredient, Vegetarian, Gluten, Milk, Egg, Fish, Crustaceans, Dish Restaurant, Item Type -->
+        <label>
+        <input type="checkbox" id="main_food" /> Main Food
+        </label>
+
+        <label>
+        <input type="checkbox" id="main_ingredient" /> Main Ingredient
+        </label>
+
+        <!--<label for="restaurant">Restaurant:</label> -->
+        <label>
+        <input type="checkbox" id="restaurant" > Restaurant
+        </label>
+        <br />
+
+        <label>
+        <input type="checkbox" id="vegetarian" checked/> Vegetarian
+        </label>
+
+        <label>
+        <input type="checkbox" id="gluten" checked/> Gluten
+        </label>
+
+        <label>
+        <input type="checkbox" id="milk" checked/> Milk
+        </label>
+
+        <label>
+        <input type="checkbox" id="egg" checked/> Egg
+        </label>
+
+        <label>
+        <input type="checkbox" id="fish" checked/> Fish
+        </label>
+
+        <label>
+        <input type="checkbox" id="crustaceans" checked/> Crustaceans
+        </label>
+        <br />
+
+        <label>
+        <input type="checkbox" id="dish_restaurant" checked/> Dish Restaurant
+        </label>
+
+        <label>
+        <input type="checkbox" id="item_type" /> Item Type
+        </label>
+        <br />
+    </form>
+
+    <!-- Display recommended dishes, prices, and nutrient info -->
+    <br>
+    Please wait while we generate your meal recommendations... around 15 to 30s.
+    <br>
+
+    <h2>Recommended Dishes</h2>
+    <table id="recommended-dishes-table">
+    <thead>
+        <tr>
+        <th>Dish</th>
+        <th>Price</th>
+        <!-- Add more columns for other dish details -->
+        </tr>
+    </thead>
+    <tbody>
+        <!-- The JavaScript code will populate the table body -->
+    </tbody>
+    </table>
+    <p>Status: <span id="status"></span></p>
+    <p>Restaurant Number: <span id="restaurant-number"></span></p>
+    <!-- <p>Total Cost: $<span id="total-cost"></span></p> -->
+
+    <script>
+        // Call the insertVariableValues function when the document finishes loading
+        window.addEventListener('load', insertVariableValues);
+    </script>
+
+    <!-- Navigation buttons -->
+    <button onclick="window.location.href='index.html'">Back to Main Page</button>
+    <br>
+    <button onclick="window.location.href='page1.html'" class="nav-button">Demographic Information</button>
+    <button onclick="window.location.href='page2.html'" class="nav-button">BMR Calculator</button>
+    <button onclick="window.location.href='page3.html'" class="nav-button">Dietary Preferences</button>
+    <button onclick="window.location.href='page4.html'" class="nav-button">Food Database</button>
+    <button onclick="window.location.href='page5.html'" class="nav-button">Meal Record Tracking</button>
+
+</body>
+</html>
